@@ -10,7 +10,7 @@ import base58
 import struct
 import httpx
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -469,10 +469,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     text = update.message.text.strip()
     
+    # Get user state from database
+    user = db.get_user(user_id)
+    
     # Check if user is entering a custom buy amount
-    if context.user_data.get("awaiting_custom_amount"):
-        context.user_data["awaiting_custom_amount"] = False
-        current_token = context.user_data.get("current_token")
+    user_state = db.get_user_state(user_id)
+    
+    if user_state and user_state.get("awaiting_custom_amount"):
+        # Clear the state first
+        db.set_user_state(user_id, {"awaiting_custom_amount": False})
+        
+        current_token = user_state.get("current_token")
         
         if not current_token:
             await update.message.reply_text(
@@ -493,7 +500,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 parse_mode="Markdown",
                 reply_markup=get_buy_keyboard(),
             )
-            context.user_data["awaiting_custom_amount"] = True
+            db.set_user_state(user_id, {"awaiting_custom_amount": True, "current_token": current_token})
             return
         
         if amount <= 0:
@@ -501,11 +508,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 "❌ Amount must be greater than 0.",
                 reply_markup=get_buy_keyboard(),
             )
-            context.user_data["awaiting_custom_amount"] = True
+            db.set_user_state(user_id, {"awaiting_custom_amount": True, "current_token": current_token})
             return
         
         # Get user
-        user = db.get_user(user_id)
         if not user:
             await update.message.reply_text("❌ Please use /start first.")
             return
@@ -578,8 +584,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             # Validate it's a valid pubkey
             Pubkey.from_string(text)
             
-            # Store token in context for trading
-            context.user_data["current_token"] = text
+            # Store token in database for trading
+            db.set_user_state(user_id, {"current_token": text, "awaiting_custom_amount": False})
             
             # Show loading message
             loading_msg = await update.message.reply_text("🔍 Looking up token...")
@@ -806,7 +812,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Buy actions
     elif data.startswith("buy_"):
         amount_str = data.replace("buy_", "")
-        current_token = context.user_data.get("current_token")
+        user_state = db.get_user_state(user_id)
+        current_token = user_state.get("current_token") if user_state else None
         
         if not current_token:
             await query.edit_message_text(
@@ -818,7 +825,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         
         if amount_str == "custom":
-            context.user_data["awaiting_custom_amount"] = True
+            db.set_user_state(user_id, {"awaiting_custom_amount": True, "current_token": current_token})
             await query.edit_message_text(
                 "✏️ *Enter custom amount in SOL:*\n\n"
                 "Example: `0.5`",
@@ -965,13 +972,13 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def setup_bot_commands(application) -> None:
     """Set up bot commands menu"""
     commands = [
-        BotCommand("start", "🚀 Start the bot & show wallet"),
-        BotCommand("buy", "💰 Buy a token"),
-        BotCommand("sell", "💸 Sell a token"),
-        BotCommand("wallet", "👛 View your wallet"),
-        BotCommand("positions", "📊 View your positions"),
-        BotCommand("settings", "⚙️ Settings"),
-        BotCommand("help", "❓ Help"),
+        ("start", "🚀 Start the bot & show wallet"),
+        ("buy", "💰 Buy a token"),
+        ("sell", "💸 Sell a token"),
+        ("wallet", "👛 View your wallet"),
+        ("positions", "📊 View your positions"),
+        ("settings", "⚙️ Settings"),
+        ("help", "❓ Help"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands menu set up successfully")

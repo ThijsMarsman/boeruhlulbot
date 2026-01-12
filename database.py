@@ -134,6 +134,17 @@ class Database:
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_telegram_id ON trades(telegram_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_positions_telegram_id ON positions(telegram_id)")
+            
+            # User state table (for tracking current token, awaiting input, etc.)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_state (
+                    id INTEGER PRIMARY KEY,
+                    telegram_id INTEGER UNIQUE NOT NULL,
+                    state_data TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+                )
+            """)
     
     def _init_postgres(self):
         """Initialize PostgreSQL tables"""
@@ -199,6 +210,17 @@ class Database:
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_trades_telegram_id ON trades(telegram_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_positions_telegram_id ON positions(telegram_id)")
+            
+            # User state table (for tracking current token, awaiting input, etc.)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_state (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT UNIQUE NOT NULL,
+                    state_data TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (telegram_id) REFERENCES users(telegram_id)
+                )
+            """)
     
     def _row_to_dict(self, row) -> Optional[Dict]:
         """Convert database row to dictionary"""
@@ -418,4 +440,56 @@ class Database:
             return True
         except Exception as e:
             logger.error(f"Error deleting position: {e}")
+            return False
+    
+    # User state methods (for tracking current token, awaiting input, etc.)
+    def get_user_state(self, telegram_id: int) -> Optional[Dict]:
+        """Get user state (current token, awaiting input, etc.)"""
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT state_data FROM user_state WHERE telegram_id = %s
+                    """ if self.is_postgres else """
+                    SELECT state_data FROM user_state WHERE telegram_id = ?
+                    """,
+                    (telegram_id,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    state_data = row[0] if not self.is_postgres else row.get("state_data")
+                    return json.loads(state_data) if state_data else {}
+                return {}
+        except Exception as e:
+            logger.error(f"Error getting user state: {e}")
+            return {}
+    
+    def set_user_state(self, telegram_id: int, state: Dict) -> bool:
+        """Set user state"""
+        try:
+            state_json = json.dumps(state)
+            with self.get_cursor() as cursor:
+                if self.is_postgres:
+                    cursor.execute(
+                        """
+                        INSERT INTO user_state (telegram_id, state_data)
+                        VALUES (%s, %s)
+                        ON CONFLICT (telegram_id)
+                        DO UPDATE SET state_data = EXCLUDED.state_data, updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (telegram_id, state_json)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        INSERT INTO user_state (telegram_id, state_data)
+                        VALUES (?, ?)
+                        ON CONFLICT (telegram_id)
+                        DO UPDATE SET state_data = excluded.state_data, updated_at = CURRENT_TIMESTAMP
+                        """,
+                        (telegram_id, state_json)
+                    )
+            return True
+        except Exception as e:
+            logger.error(f"Error setting user state: {e}")
             return False
