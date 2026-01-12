@@ -362,6 +362,9 @@ class SolanaTrader:
                     return {"success": False, "error": "Cannot connect to Jupiter API. Please try again."}
                 except httpx.TimeoutException:
                     return {"success": False, "error": "Jupiter API timeout. Please try again."}
+                except httpx.RequestError as e:
+                    logger.error(f"Jupiter API request error: {e}")
+                    return {"success": False, "error": f"Network error: {str(e)[:100]}"}
                 
                 if quote_response.status_code != 200:
                     error_text = quote_response.text
@@ -388,6 +391,9 @@ class SolanaTrader:
                     return {"success": False, "error": "Cannot connect to Jupiter API for swap."}
                 except httpx.TimeoutException:
                     return {"success": False, "error": "Swap request timeout. Please try again."}
+                except httpx.RequestError as e:
+                    logger.error(f"Jupiter swap request error: {e}")
+                    return {"success": False, "error": f"Network error: {str(e)[:100]}"}
                 
                 if swap_response.status_code != 200:
                     return {"success": False, "error": "Failed to create swap transaction"}
