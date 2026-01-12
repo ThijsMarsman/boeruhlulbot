@@ -476,9 +476,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         if not current_token:
             await update.message.reply_text(
-                "❌ Geen token geselecteerd. Stuur eerst een token address.",
+                "❌ No token selected. Please send a token address first.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Terug", callback_data="back_main")]
+                    [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
                 ]),
             )
             return
@@ -488,8 +488,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             amount = float(text.replace(",", "."))
         except ValueError:
             await update.message.reply_text(
-                "❌ Ongeldig bedrag. Probeer opnieuw.\n\n"
-                "Voorbeeld: `0.5` of `0,5`",
+                "❌ Invalid amount. Please try again.\n\n"
+                "Example: `0.5` or `0,5`",
                 parse_mode="Markdown",
                 reply_markup=get_buy_keyboard(),
             )
@@ -498,7 +498,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         if amount <= 0:
             await update.message.reply_text(
-                "❌ Bedrag moet groter zijn dan 0.",
+                "❌ Amount must be greater than 0.",
                 reply_markup=get_buy_keyboard(),
             )
             context.user_data["awaiting_custom_amount"] = True
@@ -507,26 +507,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Get user
         user = db.get_user(user_id)
         if not user:
-            await update.message.reply_text("❌ Gebruik eerst /start om te beginnen.")
+            await update.message.reply_text("❌ Please use /start first.")
             return
         
         # Check balance
         balance = await trader.get_balance(user["wallet_address"])
         if balance < amount:
             await update.message.reply_text(
-                f"❌ Onvoldoende saldo!\n\n"
-                f"Nodig: {amount} SOL\n"
-                f"Beschikbaar: {balance:.4f} SOL\n\n"
-                f"Stuur SOL naar:\n`{user['wallet_address']}`",
+                f"❌ Insufficient balance!\n\n"
+                f"Required: {amount} SOL\n"
+                f"Available: {balance:.4f} SOL\n\n"
+                f"Send SOL to:\n`{user['wallet_address']}`",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Terug", callback_data="back_main")]
+                    [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
                 ]),
             )
             return
         
         # Execute buy
-        loading_msg = await update.message.reply_text("⏳ *Bezig met kopen...*", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("⏳ *Executing buy order...*", parse_mode="Markdown")
         
         settings = db.get_settings(user_id)
         result = await trader.swap_sol_for_token(
@@ -548,26 +548,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
             
             await loading_msg.edit_text(
-                f"✅ *Aankoop Succesvol!*\n\n"
-                f"💰 Uitgegeven: {amount} SOL\n"
+                f"✅ *Buy Order Successful!*\n\n"
+                f"💰 Spent: {amount} SOL\n"
                 f"📝 Signature:\n`{result['signature']}`\n\n"
-                f"[Bekijk op Solscan](https://solscan.io/tx/{result['signature']})",
+                f"[View on Solscan](https://solscan.io/tx/{result['signature']})",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💸 Verkopen", callback_data="sell")],
-                    [InlineKeyboardButton("⬅️ Hoofdmenu", callback_data="back_main")],
+                    [InlineKeyboardButton("💸 Sell", callback_data="sell")],
+                    [InlineKeyboardButton("⬅️ Main Menu", callback_data="back_main")],
                 ]),
             )
         else:
             await loading_msg.edit_text(
-                f"❌ *Aankoop Mislukt*\n\n"
-                f"Fout: {result.get('error', 'Onbekende fout')}\n\n"
-                f"Probeer opnieuw of pas slippage aan.",
+                f"❌ *Buy Failed*\n\n"
+                f"Error: {result.get('error', 'Unknown error')}\n\n"
+                f"Please try again or adjust slippage.",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔄 Opnieuw", callback_data=f"buy_{amount}")],
-                    [InlineKeyboardButton("⚙️ Instellingen", callback_data="settings")],
-                    [InlineKeyboardButton("⬅️ Terug", callback_data="back_main")],
+                    [InlineKeyboardButton("🔄 Try Again", callback_data=f"buy_{amount}")],
+                    [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
                 ]),
             )
         return
