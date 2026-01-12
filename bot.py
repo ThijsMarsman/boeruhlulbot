@@ -965,13 +965,13 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def setup_bot_commands(application) -> None:
     """Set up bot commands menu"""
     commands = [
-        ("start", "🚀 Start de bot & toon wallet"),
-        ("buy", "💰 Koop een token"),
-        ("sell", "💸 Verkoop een token"),
-        ("wallet", "👛 Bekijk je wallet"),
-        ("positions", "📊 Bekijk je posities"),
-        ("settings", "⚙️ Instellingen"),
-        ("help", "❓ Hulp"),
+        ("start", "🚀 Start the bot & show wallet"),
+        ("buy", "💰 Buy a token"),
+        ("sell", "💸 Sell a token"),
+        ("wallet", "👛 View your wallet"),
+        ("positions", "📊 View your positions"),
+        ("settings", "⚙️ Settings"),
+        ("help", "❓ Help"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands menu set up successfully")
@@ -980,13 +980,13 @@ async def setup_bot_commands(application) -> None:
 async def cmd_buy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /buy command"""
     await update.message.reply_text(
-        "📝 *Stuur me een token contract address om te kopen*\n\n"
-        "Ondersteund:\n"
+        "📝 *Send me a token contract address to buy*\n\n"
+        "Supported:\n"
         "🎢 pump.fun tokens\n"
         "🐕 bonk.fun tokens (SOL & USD1 pairs)",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Terug", callback_data="back_main")]
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
         ]),
     )
 
@@ -997,18 +997,18 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = db.get_user(user_id)
     
     if not user:
-        await update.message.reply_text("❌ Gebruik eerst /start om te beginnen.")
+        await update.message.reply_text("❌ Please use /start first.")
         return
     
     positions = db.get_positions(user_id)
     
     if not positions:
         await update.message.reply_text(
-            "📊 *Geen posities gevonden*\n\n"
-            "Koop eerst wat tokens!",
+            "📊 *No positions found*\n\n"
+            "Buy some tokens first!",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💰 Koop Token", callback_data="buy")],
+                [InlineKeyboardButton("💰 Buy Token", callback_data="buy")],
             ]),
         )
     else:
@@ -1022,7 +1022,7 @@ async def cmd_sell(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             ])
         
         await update.message.reply_text(
-            "💸 *Selecteer een token om te verkopen:*",
+            "💸 *Select a token to sell:*",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(position_buttons),
         )
@@ -1034,18 +1034,18 @@ async def cmd_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     user = db.get_user(user_id)
     
     if not user:
-        await update.message.reply_text("❌ Gebruik eerst /start om te beginnen.")
+        await update.message.reply_text("❌ Please use /start first.")
         return
     
     balance = await trader.get_balance(user["wallet_address"])
     
     await update.message.reply_text(
-        f"👛 *Jouw Wallet*\n\n"
+        f"👛 *Your Wallet*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 *Adres:*\n`{user['wallet_address']}`\n\n"
-        f"💰 *Balans:* `{balance:.4f} SOL`\n"
+        f"📋 *Address:*\n`{user['wallet_address']}`\n\n"
+        f"💰 *Balance:* `{balance:.4f} SOL`\n"
         f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 Stuur SOL naar dit adres om te traden.",
+        f"💡 Send SOL to this address to start trading.",
         parse_mode="Markdown",
         reply_markup=get_wallet_keyboard(),
     )
@@ -1057,15 +1057,15 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = db.get_user(user_id)
     
     if not user:
-        await update.message.reply_text("❌ Gebruik eerst /start om te beginnen.")
+        await update.message.reply_text("❌ Please use /start first.")
         return
     
     positions = db.get_positions(user_id)
     
     if not positions:
-        positions_text = "📊 *Jouw Posities*\n\n_Geen open posities_"
+        positions_text = "📊 *Your Positions*\n\n_No open positions_"
     else:
-        positions_text = "📊 *Jouw Posities*\n\n"
+        positions_text = "📊 *Your Positions*\n\n"
         for pos in positions:
             positions_text += f"• *{pos['symbol']}*: {pos['amount']:.4f}\n"
     
@@ -1073,8 +1073,8 @@ async def cmd_positions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         positions_text,
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Vernieuwen", callback_data="positions")],
-            [InlineKeyboardButton("⬅️ Terug", callback_data="back_main")],
+            [InlineKeyboardButton("🔄 Refresh", callback_data="positions")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
         ]),
     )
 
@@ -1085,14 +1085,14 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = db.get_user(user_id)
     
     if not user:
-        await update.message.reply_text("❌ Gebruik eerst /start om te beginnen.")
+        await update.message.reply_text("❌ Please use /start first.")
         return
     
     settings = db.get_settings(user_id)
     
     await update.message.reply_text(
-        "⚙️ *Instellingen*\n\n"
-        f"Huidige slippage: {settings.get('slippage', 15)}%",
+        "⚙️ *Settings*\n\n"
+        f"Current slippage: {settings.get('slippage', 15)}%",
         parse_mode="Markdown",
         reply_markup=get_settings_keyboard(settings),
     )
@@ -1103,22 +1103,22 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "❓ *Help - SolSniper Bot*\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "*Hoe te gebruiken:*\n\n"
-        "1️⃣ /start - Maak je wallet\n"
-        "2️⃣ Stuur SOL naar je wallet adres\n"
-        "3️⃣ Plak een token contract address\n"
-        "4️⃣ Klik op een bedrag om te kopen\n"
-        "5️⃣ Gebruik /sell om te verkopen\n\n"
+        "*How to use:*\n\n"
+        "1️⃣ /start - Create your wallet\n"
+        "2️⃣ Send SOL to your wallet address\n"
+        "3️⃣ Paste a token contract address\n"
+        "4️⃣ Click an amount to buy\n"
+        "5️⃣ Use /sell to sell\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "*Commando's:*\n\n"
-        "/start - Start & toon wallet\n"
-        "/buy - Koop tokens\n"
-        "/sell - Verkoop tokens\n"
-        "/wallet - Bekijk wallet\n"
-        "/positions - Bekijk posities\n"
-        "/settings - Instellingen\n\n"
+        "*Commands:*\n\n"
+        "/start - Start & show wallet\n"
+        "/buy - Buy tokens\n"
+        "/sell - Sell tokens\n"
+        "/wallet - View wallet\n"
+        "/positions - View positions\n"
+        "/settings - Settings\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "*Ondersteunde platforms:*\n"
+        "*Supported platforms:*\n"
         "🎢 pump.fun\n"
         "🐕 bonk.fun (SOL & USD1)\n",
         parse_mode="Markdown",
