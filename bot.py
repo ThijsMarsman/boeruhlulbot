@@ -325,12 +325,19 @@ class SolanaTrader:
             pump_info = await self.get_pump_token_info(token_address)
             
             if pump_info.get("success") and pump_info.get("is_pump") and not pump_info.get("migrated"):
-                # Token is on pump.fun and not migrated - use pump.fun
-                logger.info(f"Token {token_address} is on pump.fun bonding curve, using pump.fun API")
-                return await self.buy_pump_token(private_key, token_address, amount_sol, slippage)
+                # Token is on pump.fun and not migrated - try pump.fun API first
+                logger.info(f"Token {token_address} is on pump.fun bonding curve, trying pump.fun API")
+                pump_result = await self.buy_pump_token(private_key, token_address, amount_sol, slippage)
+                
+                # If pump.fun API fails, fallback to Jupiter
+                if not pump_result.get("success"):
+                    logger.warning(f"Pump.fun API failed, falling back to Jupiter: {pump_result.get('error')}")
+                    # Continue to Jupiter fallback below
+                else:
+                    return pump_result
             
-            # Token is migrated or not on pump.fun - use Jupiter
-            logger.info(f"Token {token_address} is migrated or not on pump.fun, using Jupiter")
+            # Token is migrated, not on pump.fun, or pump.fun API failed - use Jupiter
+            logger.info(f"Token {token_address} using Jupiter (migrated/not pump/failed pump API)")
             
             keypair = Keypair.from_bytes(base58.b58decode(private_key))
             wallet_pubkey = str(keypair.pubkey())
