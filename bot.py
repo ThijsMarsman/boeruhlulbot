@@ -55,6 +55,12 @@ db = Database(DATABASE_URL)
 class SolanaTrader:
     """Handles all Solana blockchain interactions"""
     
+    # Pump.fun program ID
+    PUMP_PROGRAM_ID = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+    PUMP_GLOBAL = "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf"
+    PUMP_FEE_RECIPIENT = "CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM"
+    PUMP_EVENT_AUTHORITY = "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1"
+    
     def __init__(self, rpc_url: str):
         self.rpc_url = rpc_url
         self.client = AsyncClient(rpc_url)
@@ -70,32 +76,50 @@ class SolanaTrader:
             logger.error(f"Error getting balance: {e}")
             return 0.0
     
+    async def get_pump_token_info(self, token_address: str) -> dict:
+        """Get token info from pump.fun API"""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Try pump.fun API
+                response = await client.get(
+                    f"https://frontend-api.pump.fun/coins/{token_address}"
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    return {
+                        "success": True,
+                        "is_pump": True,
+                        "migrated": data.get("complete", False),
+                        "name": data.get("name", "Unknown"),
+                        "symbol": data.get("symbol", "???"),
+                        "description": data.get("description", ""),
+                        "image": data.get("image_uri", ""),
+                        "market_cap": data.get("usd_market_cap", 0),
+                        "virtual_sol_reserves": data.get("virtual_sol_reserves", 0),
+                        "virtual_token_reserves": data.get("virtual_token_reserves", 0),
+                        "bonding_curve": data.get("bonding_curve", ""),
+                        "associated_bonding_curve": data.get("associated_bonding_curve", ""),
+                        "creator": data.get("creator", ""),
+                        "address": token_address,
+                    }
+                return {"success": False, "is_pump": False, "address": token_address}
+        except Exception as e:
+            logger.error(f"Error getting pump.fun token info: {e}")
+            return {"success": False, "is_pump": False, "error": str(e), "address": token_address}
+    
     async def get_token_info(self, token_address: str) -> dict:
         """Get token information from various sources"""
         try:
-            # Try to get token metadata
-            async with httpx.AsyncClient() as client:
-                # Try Jupiter API for token info
-                response = await client.get(
-                    f"https://token.jup.ag/strict",
-                    timeout=10.0
-                )
-                if response.status_code == 200:
-                    tokens = response.json()
-                    for token in tokens:
-                        if token.get("address") == token_address:
-                            return {
-                                "success": True,
-                                "name": token.get("name", "Unknown"),
-                                "symbol": token.get("symbol", "???"),
-                                "decimals": token.get("decimals", 9),
-                                "address": token_address
-                            }
-                
+            # First check if it's a pump.fun token
+            pump_info = await self.get_pump_token_info(token_address)
+            if pump_info.get("success"):
+                return pump_info
+            
+            # Try to get token metadata from other sources
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 # Try DexScreener for price info
                 dex_response = await client.get(
                     f"https://api.dexscreener.com/latest/dex/tokens/{token_address}",
-                    timeout=10.0
                 )
                 if dex_response.status_code == 200:
                     data = dex_response.json()
@@ -103,6 +127,8 @@ class SolanaTrader:
                         pair = data["pairs"][0]
                         return {
                             "success": True,
+                            "is_pump": False,
+                            "migrated": True,
                             "name": pair.get("baseToken", {}).get("name", "Unknown"),
                             "symbol": pair.get("baseToken", {}).get("symbol", "???"),
                             "price_usd": pair.get("priceUsd", "0"),
@@ -125,49 +151,205 @@ class SolanaTrader:
             logger.error(f"Error getting token info: {e}")
             return {"success": False, "error": str(e), "address": token_address}
     
+    async def buy_pump_token(
+        self,
+        private_key: str,
+        token_address: str,
+        amount_sol: float,
+        slippage: float = 25.0
+    ) -> dict:
+        """Buy a token on pump.fun using their API"""
+        try:
+            keypair = Keypair.from_bytes(base58.b58decode(private_key))
+            wallet_pubkey = str(keypair.pubkey())
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Get transaction from pump.fun API
+                response = await client.post(
+                    "https://pumpportal.fun/api/trade-local",
+                    json={
+                        "publicKey": wallet_pubkey,
+                        "action": "buy",
+                        "mint": token_address,
+                        "amount": amount_sol,
+                        "denominatedInSol": "true",
+                        "slippage": slippage,
+                        "priorityFee": 0.0005,
+                        "pool": "pump"
+                    }
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Pump.fun API error: {response.text}")
+                    return {"success": False, "error": f"Pump.fun API error: {response.text[:100]}"}
+                
+                # Get the transaction bytes
+                tx_bytes = response.content
+                
+                # Deserialize, sign and send
+                from solders.transaction import VersionedTransaction
+                tx = VersionedTransaction.from_bytes(tx_bytes)
+                
+                # Sign the transaction
+                signed_tx = VersionedTransaction(tx.message, [keypair])
+                
+                # Send transaction
+                tx_response = await self.client.send_transaction(
+                    signed_tx,
+                    opts={"skip_preflight": True, "max_retries": 3}
+                )
+                
+                signature = str(tx_response.value)
+                
+                return {
+                    "success": True,
+                    "signature": signature,
+                    "amount_in": amount_sol,
+                    "platform": "pump.fun"
+                }
+                
+        except Exception as e:
+            logger.error(f"Pump.fun buy error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def sell_pump_token(
+        self,
+        private_key: str,
+        token_address: str,
+        percentage: int = 100,
+        slippage: float = 25.0
+    ) -> dict:
+        """Sell a token on pump.fun using their API"""
+        try:
+            keypair = Keypair.from_bytes(base58.b58decode(private_key))
+            wallet_pubkey = str(keypair.pubkey())
+            
+            # Get token balance
+            token_balance = await self.get_token_balance(wallet_pubkey, token_address)
+            if token_balance <= 0:
+                return {"success": False, "error": "No tokens to sell"}
+            
+            sell_amount = int(token_balance * percentage / 100)
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Get transaction from pump.fun API
+                response = await client.post(
+                    "https://pumpportal.fun/api/trade-local",
+                    json={
+                        "publicKey": wallet_pubkey,
+                        "action": "sell",
+                        "mint": token_address,
+                        "amount": sell_amount,
+                        "denominatedInSol": "false",
+                        "slippage": slippage,
+                        "priorityFee": 0.0005,
+                        "pool": "pump"
+                    }
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"Pump.fun API error: {response.text}")
+                    return {"success": False, "error": f"Pump.fun API error: {response.text[:100]}"}
+                
+                # Get the transaction bytes
+                tx_bytes = response.content
+                
+                # Deserialize, sign and send
+                from solders.transaction import VersionedTransaction
+                tx = VersionedTransaction.from_bytes(tx_bytes)
+                
+                # Sign the transaction
+                signed_tx = VersionedTransaction(tx.message, [keypair])
+                
+                # Send transaction
+                tx_response = await self.client.send_transaction(
+                    signed_tx,
+                    opts={"skip_preflight": True, "max_retries": 3}
+                )
+                
+                signature = str(tx_response.value)
+                
+                return {
+                    "success": True,
+                    "signature": signature,
+                    "amount_sold": sell_amount,
+                    "percentage": percentage,
+                    "platform": "pump.fun"
+                }
+                
+        except Exception as e:
+            logger.error(f"Pump.fun sell error: {e}")
+            return {"success": False, "error": str(e)}
+    
     async def swap_sol_for_token(
         self,
         private_key: str,
         token_address: str,
         amount_sol: float,
-        slippage: float = 15.0
+        slippage: float = 25.0
     ) -> dict:
-        """Execute a buy order using Jupiter aggregator"""
+        """Execute a buy order - checks pump.fun first, then Jupiter"""
         try:
+            # First check if it's a pump.fun token
+            pump_info = await self.get_pump_token_info(token_address)
+            
+            if pump_info.get("success") and pump_info.get("is_pump") and not pump_info.get("migrated"):
+                # Token is on pump.fun and not migrated - use pump.fun
+                logger.info(f"Token {token_address} is on pump.fun bonding curve, using pump.fun API")
+                return await self.buy_pump_token(private_key, token_address, amount_sol, slippage)
+            
+            # Token is migrated or not on pump.fun - use Jupiter
+            logger.info(f"Token {token_address} is migrated or not on pump.fun, using Jupiter")
+            
             keypair = Keypair.from_bytes(base58.b58decode(private_key))
             wallet_pubkey = str(keypair.pubkey())
             
             amount_lamports = int(amount_sol * LAMPORTS_PER_SOL)
             slippage_bps = int(slippage * 100)  # Convert to basis points
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 # Get quote from Jupiter
-                quote_response = await client.get(
-                    "https://quote-api.jup.ag/v6/quote",
-                    params={
-                        "inputMint": "So11111111111111111111111111111111111111112",  # SOL
-                        "outputMint": token_address,
-                        "amount": str(amount_lamports),
-                        "slippageBps": str(slippage_bps),
-                    },
-                    timeout=30.0
-                )
+                try:
+                    quote_response = await client.get(
+                        "https://quote-api.jup.ag/v6/quote",
+                        params={
+                            "inputMint": "So11111111111111111111111111111111111111112",  # SOL
+                            "outputMint": token_address,
+                            "amount": str(amount_lamports),
+                            "slippageBps": str(slippage_bps),
+                        },
+                    )
+                except httpx.ConnectError as e:
+                    logger.error(f"Jupiter API connection error: {e}")
+                    return {"success": False, "error": "Cannot connect to Jupiter API. Please try again."}
+                except httpx.TimeoutException:
+                    return {"success": False, "error": "Jupiter API timeout. Please try again."}
                 
                 if quote_response.status_code != 200:
-                    return {"success": False, "error": "Failed to get quote"}
+                    error_text = quote_response.text
+                    logger.error(f"Jupiter quote error: {error_text}")
+                    return {"success": False, "error": f"Failed to get quote: {error_text[:100]}"}
                 
                 quote = quote_response.json()
                 
+                if "error" in quote:
+                    return {"success": False, "error": quote.get("error", "Quote error")}
+                
                 # Get swap transaction
-                swap_response = await client.post(
-                    "https://quote-api.jup.ag/v6/swap",
-                    json={
-                        "quoteResponse": quote,
-                        "userPublicKey": wallet_pubkey,
-                        "wrapAndUnwrapSol": True,
-                    },
-                    timeout=30.0
-                )
+                try:
+                    swap_response = await client.post(
+                        "https://quote-api.jup.ag/v6/swap",
+                        json={
+                            "quoteResponse": quote,
+                            "userPublicKey": wallet_pubkey,
+                            "wrapAndUnwrapSol": True,
+                        },
+                    )
+                except httpx.ConnectError as e:
+                    logger.error(f"Jupiter swap connection error: {e}")
+                    return {"success": False, "error": "Cannot connect to Jupiter API for swap."}
+                except httpx.TimeoutException:
+                    return {"success": False, "error": "Swap request timeout. Please try again."}
                 
                 if swap_response.status_code != 200:
                     return {"success": False, "error": "Failed to create swap transaction"}
@@ -206,10 +388,21 @@ class SolanaTrader:
         private_key: str,
         token_address: str,
         percentage: int = 100,
-        slippage: float = 15.0
+        slippage: float = 25.0
     ) -> dict:
-        """Execute a sell order using Jupiter aggregator"""
+        """Execute a sell order - checks pump.fun first, then Jupiter"""
         try:
+            # First check if it's a pump.fun token
+            pump_info = await self.get_pump_token_info(token_address)
+            
+            if pump_info.get("success") and pump_info.get("is_pump") and not pump_info.get("migrated"):
+                # Token is on pump.fun and not migrated - use pump.fun
+                logger.info(f"Token {token_address} is on pump.fun bonding curve, using pump.fun API")
+                return await self.sell_pump_token(private_key, token_address, percentage, slippage)
+            
+            # Token is migrated or not on pump.fun - use Jupiter
+            logger.info(f"Token {token_address} is migrated or not on pump.fun, using Jupiter")
+            
             keypair = Keypair.from_bytes(base58.b58decode(private_key))
             wallet_pubkey = str(keypair.pubkey())
             
@@ -222,7 +415,7 @@ class SolanaTrader:
             sell_amount = int(token_balance * percentage / 100)
             slippage_bps = int(slippage * 100)
             
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 # Get quote from Jupiter
                 quote_response = await client.get(
                     "https://quote-api.jup.ag/v6/quote",
@@ -583,19 +776,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             token_info = await trader.get_token_info(text)
             
             if token_info.get("success"):
-                # Determine platform
-                platform = "Unknown"
-                if "pump" in token_info.get("dex", "").lower():
-                    platform = "🎢 pump.fun"
-                elif "bonk" in text.lower() or "raydium" in token_info.get("dex", "").lower():
-                    platform = "🐕 bonk.fun / Raydium"
+                # Check if it's a pump.fun token
+                if token_info.get("is_pump"):
+                    migrated_status = "✅ Migrated to Raydium" if token_info.get("migrated") else "🔄 On Bonding Curve"
+                    market_cap = token_info.get("market_cap", 0)
+                    if isinstance(market_cap, str):
+                        market_cap = float(market_cap) if market_cap else 0
+                    
+                    token_text = f"""
+🎢 *{token_info.get('name', 'Unknown Token')}* (${token_info.get('symbol', '???')})
+
+━━━━━━━━━━━━━━━━━━━━━━
+📍 *Platform:* pump.fun
+📊 *Status:* {migrated_status}
+💰 *Market Cap:* ${int(market_cap):,}
+━━━━━━━━━━━━━━━━━━━━━━
+
+📋 *Contract:*
+`{text}`
+
+Select an amount to buy:
+"""
                 else:
+                    # Regular DEX token
                     platform = f"📊 {token_info.get('dex', 'DEX')}"
-                
-                price_change = float(token_info.get("price_change_24h", 0))
-                change_emoji = "🟢" if price_change >= 0 else "🔴"
-                
-                token_text = f"""
+                    price_change = float(token_info.get("price_change_24h", 0))
+                    change_emoji = "🟢" if price_change >= 0 else "🔴"
+                    
+                    token_text = f"""
 🪙 *{token_info.get('name', 'Unknown Token')}* (${token_info.get('symbol', '???')})
 
 ━━━━━━━━━━━━━━━━━━━━━━
