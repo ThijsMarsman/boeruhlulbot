@@ -10,7 +10,7 @@ import base58
 import struct
 import httpx
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -965,13 +965,13 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def setup_bot_commands(application) -> None:
     """Set up bot commands menu"""
     commands = [
-        ("start", "🚀 Start the bot & show wallet"),
-        ("buy", "💰 Buy a token"),
-        ("sell", "💸 Sell a token"),
-        ("wallet", "👛 View your wallet"),
-        ("positions", "📊 View your positions"),
-        ("settings", "⚙️ Settings"),
-        ("help", "❓ Help"),
+        BotCommand("start", "🚀 Start the bot & show wallet"),
+        BotCommand("buy", "💰 Buy a token"),
+        BotCommand("sell", "💸 Sell a token"),
+        BotCommand("wallet", "👛 View your wallet"),
+        BotCommand("positions", "📊 View your positions"),
+        BotCommand("settings", "⚙️ Settings"),
+        BotCommand("help", "❓ Help"),
     ]
     await application.bot.set_my_commands(commands)
     logger.info("Bot commands menu set up successfully")
