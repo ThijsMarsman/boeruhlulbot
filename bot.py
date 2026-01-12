@@ -10,7 +10,7 @@ import base58
 import struct
 import httpx
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -859,6 +859,180 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Update {update} caused error {context.error}")
 
 
+async def setup_bot_commands(application: Application) -> None:
+    """Setup bot commands menu"""
+    commands = [
+        BotCommand("start", "🚀 Start de bot & toon wallet"),
+        BotCommand("buy", "💰 Koop een token"),
+        BotCommand("sell", "💸 Verkoop een token"),
+        BotCommand("wallet", "👛 Bekijk je wallet"),
+        BotCommand("positions", "📊 Bekijk je posities"),
+        BotCommand("settings", "⚙️ Instellingen"),
+        BotCommand("help", "❓ Hulp"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands menu setup complete")
+
+
+async def buy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /buy command"""
+    await update.message.reply_text(
+        "📝 *Send me a token contract address to buy*\n\n"
+        "Supported:\n"
+        "🎢 pump.fun tokens\n"
+        "🐕 bonk.fun tokens (SOL & USD1 pairs)",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
+        ]),
+    )
+
+
+async def sell_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /sell command"""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Please /start the bot first.")
+        return
+    
+    # Get user's token positions
+    positions = db.get_positions(user_id)
+    
+    if not positions:
+        await update.message.reply_text(
+            "📊 *No positions found*\n\n"
+            "Buy some tokens first!",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💰 Buy Token", callback_data="buy")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
+            ]),
+        )
+    else:
+        # Show positions to sell
+        position_buttons = []
+        for pos in positions[:10]:  # Limit to 10
+            position_buttons.append([
+                InlineKeyboardButton(
+                    f"{pos['symbol']} - {pos['amount']:.4f}",
+                    callback_data=f"selltoken_{pos['token_address'][:16]}",
+                )
+            ])
+        position_buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="back_main")])
+        
+        await update.message.reply_text(
+            "💸 *Select a token to sell:*",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(position_buttons),
+        )
+
+
+async def wallet_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /wallet command"""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Please /start the bot first.")
+        return
+    
+    balance = await trader.get_balance(user["wallet_address"])
+    wallet_text = f"""
+👛 *Your Wallet*
+
+━━━━━━━━━━━━━━━━━━━━━━
+📋 *Address:*
+`{user['wallet_address']}`
+
+💰 *Balance:* `{balance:.4f} SOL`
+━━━━━━━━━━━━━━━━━━━━━━
+
+💡 Send SOL to this address to fund your trading wallet.
+"""
+    await update.message.reply_text(
+        wallet_text,
+        parse_mode="Markdown",
+        reply_markup=get_wallet_keyboard(),
+    )
+
+
+async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /positions command"""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Please /start the bot first.")
+        return
+    
+    positions = db.get_positions(user_id)
+    
+    if not positions:
+        positions_text = "📊 *Your Positions*\n\n_No open positions_"
+    else:
+        positions_text = "📊 *Your Positions*\n\n"
+        for pos in positions:
+            positions_text += f"• *{pos['symbol']}*: {pos['amount']:.4f}\n"
+    
+    await update.message.reply_text(
+        positions_text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh", callback_data="positions")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="back_main")],
+        ]),
+    )
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /settings command"""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    if not user:
+        await update.message.reply_text("❌ Please /start the bot first.")
+        return
+    
+    settings = db.get_settings(user_id)
+    await update.message.reply_text(
+        "⚙️ *Settings*\n\n"
+        f"Current slippage: {settings.get('slippage', 15)}%",
+        parse_mode="Markdown",
+        reply_markup=get_settings_keyboard(settings),
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /help command"""
+    help_text = """
+❓ *Help - SolSniper Bot*
+
+*Commands:*
+/start - 🚀 Start de bot & toon wallet
+/buy - 💰 Koop een token
+/sell - 💸 Verkoop een token
+/wallet - 👛 Bekijk je wallet
+/positions - 📊 Bekijk je posities
+/settings - ⚙️ Instellingen
+/help - ❓ Hulp
+
+*How to Use:*
+1️⃣ Send `/start` to create your wallet
+2️⃣ Send SOL to your wallet address
+3️⃣ Paste a token contract address to trade
+4️⃣ Use the buttons to buy/sell tokens
+
+*Supported Platforms:*
+🎢 pump.fun (pre & post migration)
+🐕 bonk.fun (SOL & USD1 pairs)
+
+⚡ Fast execution • 🛡️ MEV protection
+"""
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
+
 def main() -> None:
     """Start the bot"""
     # Initialize database
@@ -867,8 +1041,17 @@ def main() -> None:
     # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
+    # Setup bot commands menu
+    application.post_init = setup_bot_commands
+    
     # Add handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("buy", buy_command))
+    application.add_handler(CommandHandler("sell", sell_command))
+    application.add_handler(CommandHandler("wallet", wallet_command))
+    application.add_handler(CommandHandler("positions", positions_command))
+    application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(CallbackQueryHandler(handle_callback))
     
