@@ -469,46 +469,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     user_id = update.effective_user.id
     text = update.message.text.strip()
     
-    # Get user state from database
+    # Get user from database
     user = db.get_user(user_id)
     
-    # Check if user is entering a custom buy amount
-    user_state = db.get_user_state(user_id)
+    # First, check if this looks like a number (custom amount input)
+    # This handles cases like "0.5", "0,5", "1", "0.001", etc.
+    try:
+        potential_amount = float(text.replace(",", "."))
+        is_number = True
+    except ValueError:
+        is_number = False
     
-    if user_state and user_state.get("awaiting_custom_amount"):
-        # Clear the state first
-        db.set_user_state(user_id, {"awaiting_custom_amount": False})
+    # Get user state from database
+    user_state = db.get_user_state(user_id)
+    current_token = user_state.get("current_token") if user_state else None
+    awaiting_custom = user_state.get("awaiting_custom_amount", False) if user_state else False
+    
+    # If it's a number AND we have a current token, treat it as a buy amount
+    if is_number and current_token:
+        amount = potential_amount
         
-        current_token = user_state.get("current_token")
-        
-        if not current_token:
-            await update.message.reply_text(
-                "❌ No token selected. Please send a token address first.",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
-                ]),
-            )
-            return
-        
-        # Parse amount (support both . and , as decimal separator)
-        try:
-            amount = float(text.replace(",", "."))
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Invalid amount. Please try again.\n\n"
-                "Example: `0.5` or `0,5`",
-                parse_mode="Markdown",
-                reply_markup=get_buy_keyboard(),
-            )
-            db.set_user_state(user_id, {"awaiting_custom_amount": True, "current_token": current_token})
-            return
+        # Clear awaiting state
+        db.set_user_state(user_id, {"awaiting_custom_amount": False, "current_token": current_token})
         
         if amount <= 0:
             await update.message.reply_text(
                 "❌ Amount must be greater than 0.",
                 reply_markup=get_buy_keyboard(),
             )
-            db.set_user_state(user_id, {"awaiting_custom_amount": True, "current_token": current_token})
             return
         
         # Get user
@@ -526,6 +514,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"Send SOL to:\n`{user['wallet_address']}`",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔄 Refresh Balance", callback_data="wallet")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="back_main")]
                 ]),
             )
