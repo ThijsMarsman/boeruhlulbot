@@ -254,19 +254,29 @@ class SolanaTrader:
             
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # Get transaction from pump.fun API
-                response = await client.post(
-                    "https://pumpportal.fun/api/trade-local",
-                    json={
-                        "publicKey": wallet_pubkey,
-                        "action": "sell",
-                        "mint": token_address,
-                        "amount": sell_amount,
-                        "denominatedInSol": "false",
-                        "slippage": slippage,
-                        "priorityFee": 0.0005,
-                        "pool": "pump"
-                    }
-                )
+                try:
+                    response = await client.post(
+                        "https://pumpportal.fun/api/trade-local",
+                        json={
+                            "publicKey": wallet_pubkey,
+                            "action": "sell",
+                            "mint": token_address,
+                            "amount": sell_amount,
+                            "denominatedInSol": "false",
+                            "slippage": slippage,
+                            "priorityFee": 0.0005,
+                            "pool": "pump"
+                        }
+                    )
+                except httpx.ConnectError as e:
+                    logger.error(f"Pump.fun API connection error: {e}")
+                    return {"success": False, "error": "Cannot connect to pump.fun API. Please try again later."}
+                except httpx.TimeoutException:
+                    logger.error("Pump.fun API timeout")
+                    return {"success": False, "error": "pump.fun API timeout. Please try again."}
+                except httpx.RequestError as e:
+                    logger.error(f"Pump.fun API request error: {e}")
+                    return {"success": False, "error": f"Network error: {str(e)[:100]}"}
                 
                 if response.status_code != 200:
                     logger.error(f"Pump.fun API error: {response.text}")
